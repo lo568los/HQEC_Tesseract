@@ -101,6 +101,8 @@ if __name__ == '__main__':
 
 ```
 
+To see multi-logical decoding in action, run `Examples/Tensor_Network_Decoding/Multi_Logical_Decoding/max_rate_multi_logical_HaPPY_TN.py`.
+
 ## Integer optimization decoder
 The integer optimization decoder can analyze the recoverability of logical information in a holographic quantum error correction code under a given Pauli quantum error. It is important to note that using the integer optimization decoder requires a Gurobi license.
 

@@ -37,7 +37,13 @@ def generate_tensor_array(tensor):
     tensor_array = np.zeros([dim_size] * num_legs)
 
     # Get all stabilizers including logical operators if they exist
-    all_stabilizers = tensor.all_ups
+    all_stabilizers = tensor.all_ups or []
+    if len(all_stabilizers) == 0:
+        candidate_ups = tensor.stabilizer_list + tensor.logical_z_list + tensor.logical_x_list
+        all_stabilizers = [ups for ups in candidate_ups if ups is not None]
+
+    if len(all_stabilizers) == 0:
+        raise ValueError("ups lengths are not consistent.")
 
     # Generate all possible stabilizers combinations (ups powers)
     power, all_stabs_list = traverse_ups_powers(all_stabilizers)
@@ -110,7 +116,7 @@ def convert_tensors_to_np_tensors(tensor_list):
 def convert_np_tensors_to_tn_nodes(np_tensor_dict):
     """
     Convert all NumPy tensors in the dictionary to their respective tn.Node objects,
-    naming each node according to its tensor ID.
+    naming each node according to its tensor ID and preserving edge origins.
 
     Args:
     np_tensor_dict (dict): Dictionary mapping tensor IDs to their corresponding NumPy tensors.
@@ -121,8 +127,12 @@ def convert_np_tensors_to_tn_nodes(np_tensor_dict):
     tn_node_dict = {}
 
     for tensor_id, np_tensor in np_tensor_dict.items():
-        # Create a tn.Node for each NumPy tensor, naming it with its tensor ID
-        node = tn.Node(np_tensor[0], name=str(tensor_id))
+        tensor_array, dimension_origin = np_tensor
+        node = tn.Node(tensor_array, name=str(tensor_id))
+
+        for edge, origin in zip(node.edges, dimension_origin):
+            edge.set_name(f"{origin[0]}_{origin[1]}")
+
         tn_node_dict[tensor_id] = node
 
     return tn_node_dict
@@ -390,6 +400,24 @@ def add_boundary_conditions_to_dangling_edges(tn_nodes, boundary_leg_ids, s_paul
     return new_edges
 
 
+def collect_logical_leg_ids(tensor_list):
+    """Collect all logical legs in the tensor network.
+
+    Args:
+        tensor_list (list): A list of Tensor objects.
+
+    Returns:
+        list: Sorted list of (tensor_id, leg_id) tuples representing logical legs.
+    """
+    logical_leg_ids = []
+    for tensor in tensor_list:
+        for leg_index, leg in enumerate(tensor.legs):
+            if leg.logical:
+                logical_leg_ids.append((tensor.tensor_id, leg_index))
+
+    return sorted(logical_leg_ids)
+
+
 def normalize_tensor_node(node):
     """
     Normalize the tensor within a tensor network node in place.
@@ -406,14 +434,12 @@ def normalize_tensor_node(node):
     return node
 
 
-def tn_quantum_error_correction_decoder_multiprocess(tensor_list, p, rx, ry, rz, N, stabilizers=None, logical_x=None,
-                                                     logical_z=None, n_process=1, cpu_affinity_list=None, f=None):
-    if stabilizers is None or logical_z is None or logical_x is None:
+def tn_quantum_error_correction_decoder_multiprocess(tensor_list, p, rx, ry, rz, N, stabilizers=None, logical_xs=None,
+                                                     logical_zs=None, n_process=1, cpu_affinity_list=None, f=None):
+    if stabilizers is None or logical_zs is None or logical_xs is None:
         results_dict = batch_push(tensor_list)
         stabilizers = extract_stabilizers_from_result_dict(results_dict)
         logical_zs, logical_xs = extract_logicals_from_result_dict(results_dict)
-        logical_z = logical_zs[0]
-        logical_x = logical_xs[0]
 
     stabilizers_binary = batch_convert_to_binary_vectors(stabilizers)
     stabilizer_matrix = np.array(stabilizers_binary)
@@ -422,7 +448,11 @@ def tn_quantum_error_correction_decoder_multiprocess(tensor_list, p, rx, ry, rz,
     if f is None:
         f = create_f(symplectic_stabilizers=stabilizers_binary)
 
-    args = [(tensor_list, p, rx, ry, rz, f, n, stabilizers, stabilizer_matrix, logical_z, logical_x, cpu_affinity_list)
+    logical_xs_binary = batch_convert_to_binary_vectors(logical_xs)
+    logical_zs_binary = batch_convert_to_binary_vectors(logical_zs)
+
+    args = [(tensor_list, p, rx, ry, rz, f, n, stabilizers, stabilizer_matrix, logical_zs, logical_xs,
+             logical_zs_binary, logical_xs_binary, cpu_affinity_list)
             for _ in range(N)]
 
     successful_decodings = 0
@@ -434,8 +464,8 @@ def tn_quantum_error_correction_decoder_multiprocess(tensor_list, p, rx, ry, rz,
     return success_rate
 
 
-def tensor_network_decoding_iteration(tensor_list, p, rx, ry, rz, f, n, stabilizers, stabilizer_matrix, logical_z,
-                                      logical_x, affinity=None):
+def tensor_network_decoding_iteration(tensor_list, p, rx, ry, rz, f, n, stabilizers, stabilizer_matrix, logical_zs,
+                                      logical_xs, logical_zs_binary, logical_xs_binary, affinity=None):
     # Set CPU affinity for the process if specified
     if affinity is not None:
         process_ = psutil.Process(os.getpid())
@@ -447,7 +477,8 @@ def tensor_network_decoding_iteration(tensor_list, p, rx, ry, rz, f, n, stabiliz
     e = mod2_matrix_multiply(f, y)
     str_e = binary_vector_to_pauli(binary_vector=e)
 
-    str_e_bar = tensor_network_decoder(tensor_list, p, rx, ry, rz, str_e, e, logical_z, logical_x)
+    str_e_bar = tensor_network_decoder(tensor_list, p, rx, ry, rz, str_e, e, logical_zs, logical_xs,
+                                       logical_zs_binary, logical_xs_binary)
     e_bar = pauli_to_binary_vector(str_e_bar)
 
     # Compare the estimated error with the actual error
@@ -455,45 +486,68 @@ def tensor_network_decoding_iteration(tensor_list, p, rx, ry, rz, f, n, stabiliz
     return is_successful
 
 
-def tensor_network_decoder(tensor_list, p, rx, ry, rz, str_e, e, logical_z, logical_x):
+def tensor_network_decoder(tensor_list, p, rx, ry, rz, str_e, e, logical_zs, logical_xs,
+                          logical_zs_binary, logical_xs_binary):
     boundary_leg_ids = collect_boundary_leg_ids(tensor_list, starting_tensor_id=0)
-    edges_during_backtrack = collect_edges_during_backtrack(tensor_list, starting_tensor_id=0, logger_mode=False)
+    logical_leg_ids = collect_logical_leg_ids(tensor_list)
     edges = collect_network_edges(tensor_list)
     np_tensor_dict = convert_tensors_to_np_tensors(tensor_list)
-    tn_nodes = convert_np_tensors_to_tn_nodes(np_tensor_dict)
-    connected_edges = connect_tn_nodes(tn_nodes, edges)
-
-    bound_connected_edges = add_boundary_conditions_to_dangling_edges(tn_nodes=tn_nodes,
-                                                                      boundary_leg_ids=boundary_leg_ids,
-                                                                      s_pauli=str_e, p=p, rx=rx, ry=ry, rz=rz)
-    new_node = contract_tn_edges(bound_connected_edges)
-    for edge_key in edges_during_backtrack:
-        if connected_edges[edge_key].node1.name == connected_edges[edge_key].node2.name:
-            new_nodes_name = connected_edges[edge_key].node1.name
-        else:
-            new_nodes_name = f"{connected_edges[edge_key].node1.name if connected_edges[edge_key].node1.name != '__unnamed_node__' else ''}{'_' if connected_edges[edge_key].node1.name and connected_edges[edge_key].node2.name != '__unnamed_node__' else ''}{connected_edges[edge_key].node2.name if connected_edges[edge_key].node2.name != '__unnamed_node__' else ''}"
-
-        new_node = tn.contract(connected_edges[edge_key])
-        new_node.set_name(new_nodes_name)
-        new_node = contract_self_edges(new_node)
-        new_node = normalize_tensor_node(new_node)
-
-    ml_coset = np.argmax(new_node.tensor)
-    if ml_coset == 0:
+    num_logical = len(logical_xs)
+    if num_logical == 0:
         return str_e
-    elif ml_coset == 1:
-        logical_x_binary = pauli_to_binary_vector(logical_x)
-        xe = apply_mod2_sum(e, [logical_x_binary], [1])
-        str_xe = binary_vector_to_pauli(xe)
-        return str_xe
-    elif ml_coset == 2:
-        logical_x_binary = pauli_to_binary_vector(logical_x)
-        logical_z_binary = pauli_to_binary_vector(logical_z)
-        ye = apply_mod2_sum(e, [logical_x_binary, logical_z_binary], [1, 1])
-        str_ye = binary_vector_to_pauli(ye)
-        return str_ye
+
+    def contract_with_logical_choice(target_logical_idx, target_digit):
+        tn_nodes_local = convert_np_tensors_to_tn_nodes(np_tensor_dict)
+        connect_tn_nodes(tn_nodes_local, edges)
+
+        bound_edges_local = add_boundary_conditions_to_dangling_edges(
+            tn_nodes=tn_nodes_local,
+            boundary_leg_ids=boundary_leg_ids,
+            s_pauli=str_e,
+            p=p,
+            rx=rx,
+            ry=ry,
+            rz=rz,
+        )
+
+        all_nodes_local = set(tn_nodes_local.values())
+        for edge in bound_edges_local.values():
+            all_nodes_local.add(edge.node1)
+            all_nodes_local.add(edge.node2)
+
+        for idx, (tensor_id, leg_id) in enumerate(logical_leg_ids):
+            edge = tn_nodes_local[tensor_id].edges[leg_id]
+            if idx == target_logical_idx:
+                vec = np.zeros(4)
+                vec[target_digit] = 1.0
+            else:
+                vec = np.ones(4)
+            projector = tn.Node(vec)
+            all_nodes_local.add(projector)
+            edge ^ projector[0]
+
+        contracted_node = tn.contractors.greedy(list(all_nodes_local), ignore_edge_order=True)
+        contracted_node = contract_self_edges(contracted_node)
+        contracted_node = normalize_tensor_node(contracted_node)
+
+        return float(contracted_node.tensor)
+
+    digits = []
+    for logical_idx in range(num_logical):
+        probabilities = [contract_with_logical_choice(logical_idx, digit) for digit in range(4)]
+        digits.append(int(np.argmax(probabilities)))
+
+    corrections = []
+    for idx, digit in enumerate(digits):
+        if digit in (1, 2):
+            corrections.append(logical_xs_binary[idx])
+        if digit in (2, 3):
+            corrections.append(logical_zs_binary[idx])
+
+    if corrections:
+        e_bar = apply_mod2_sum(e, corrections, [1] * len(corrections))
     else:
-        logical_z_binary = pauli_to_binary_vector(logical_z)
-        ze = apply_mod2_sum(e, [logical_z_binary], [1])
-        str_ze = binary_vector_to_pauli(ze)
-        return str_ze
+        e_bar = e
+
+    str_e_bar = binary_vector_to_pauli(e_bar)
+    return str_e_bar
