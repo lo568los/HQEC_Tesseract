@@ -1,0 +1,11 @@
+     shots,    errors,  discards, seconds,decoder,strong_id,json_metadata,custom_counts
+     10000,         0,         0,   0.094,tesseract,8f0e322ec1e762c658726849310ef20c46634d301bd84b52e352a47a44c3c11d,"{""basis"":""Z-memory"",""decoder"":""tesseract"",""p"":0.01}",
+     10000,         1,         0,   0.083,tesseract,37678f57a651e45c9cf98f0ed68f0509ed16dcff3c2638ac0ef008307575ffb8,"{""basis"":""X-memory"",""decoder"":""tesseract"",""p"":0.01}",
+     10000,        29,         0,   0.843,tesseract,7cb39b13ea03ab33202b33120a263f882492ac69a2417200c348b50c038258f4,"{""basis"":""X-memory"",""decoder"":""tesseract"",""p"":0.060000000000000005}",
+     10000,        33,         0,   0.843,tesseract,f8b4460fadfe0a33192325676992e6ff681357b3f01ff6fecb5410b014245614,"{""basis"":""Z-memory"",""decoder"":""tesseract"",""p"":0.060000000000000005}",
+      3345,       118,         0,   0.961,tesseract,f2ec9704d03c0f11cfc3c529ea5a1839f8a594546afad79552579899beda9e12,"{""basis"":""Z-memory"",""decoder"":""tesseract"",""p"":0.11}",
+      2321,       101,         0,   0.734,tesseract,7ad98cdcd80678e505e139853ca737c928278f902719890b3b99f82230f5d4ef,"{""basis"":""X-memory"",""decoder"":""tesseract"",""p"":0.11}",
+       785,       177,         0,   0.769,tesseract,5956fab939eb06e61ae26771972046ae18a6600870bdf52045ef4cb0783232c8,"{""basis"":""Z-memory"",""decoder"":""tesseract"",""p"":0.21000000000000002}",
+      1809,       206,         0,   1.000,tesseract,e0afe56f2f14ee72f1cc4016843d6d77711e50ae6fe61f792f3255b8f3c60fab,"{""basis"":""X-memory"",""decoder"":""tesseract"",""p"":0.16}",
+      1809,       208,         0,    1.03,tesseract,478f7012ab1c197f0c2f911bb41982d9d8420c81f751fdb98f265bcf6bd3a722,"{""basis"":""Z-memory"",""decoder"":""tesseract"",""p"":0.16}",
+       785,       204,         0,   0.692,tesseract,d48fd714796fa1111850730aac8f00c4dc4f6082d7a304344eb7f7e0e4083236,"{""basis"":""X-memory"",""decoder"":""tesseract"",""p"":0.21000000000000002}",
